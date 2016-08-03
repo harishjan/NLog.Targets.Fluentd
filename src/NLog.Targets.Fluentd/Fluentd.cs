@@ -20,15 +20,16 @@ using System.IO;
 using System.Text;
 using System.Net.Sockets;
 using System.Diagnostics;
-using System.Reflection;
-using NLog;
+using Newtonsoft.Json;
 using MsgPack;
 using MsgPack.Serialization;
+using System.Reflection;
 
 namespace NLog.Targets
 {
-    internal class OrdinaryDictionarySerializer: MessagePackSerializer<IDictionary<string, object>>
+    internal class OrdinaryDictionarySerializer : MessagePackSerializer<IDictionary<string, object>>
     {
+        public OrdinaryDictionarySerializer(SerializationContext sc) : base(sc) { }
         protected override void PackToCore(Packer packer, IDictionary<string, object> objectTree)
         {
             packer.PackMapHeader(objectTree);
@@ -106,7 +107,7 @@ namespace NLog.Targets
             }
         }
 
-        public void UnpackTo(Unpacker unpacker, IDictionary<string, object> collection)
+        public new void UnpackTo(Unpacker unpacker, IDictionary<string, object> collection)
         {
             long mapLength;
             if (!unpacker.ReadMapLength(out mapLength))
@@ -123,7 +124,7 @@ namespace NLog.Targets
             return retval;
         }
 
-        public void UnpackTo(Unpacker unpacker, object collection)
+        public new void UnpackTo(Unpacker unpacker, object collection)
         {
             var _collection = collection as IDictionary<string, object>;
             if (_collection == null)
@@ -150,7 +151,7 @@ namespace NLog.Targets
         public FluentdEmitter(Stream stream)
         {
             this.serializationContext = new SerializationContext(PackerCompatibilityOptions.PackBinaryAsRaw);
-            this.serializationContext.Serializers.Register(new OrdinaryDictionarySerializer());
+            this.serializationContext.Serializers.Register(new OrdinaryDictionarySerializer(this.serializationContext));
             this.packer = Packer.Create(stream);
         }
     }
@@ -185,6 +186,8 @@ namespace NLog.Targets
         private Stream stream;
 
         private FluentdEmitter emitter;
+
+        private bool AddPlainMessage { get; set; }
 
         protected override void InitializeTarget()
         {
@@ -241,18 +244,28 @@ namespace NLog.Targets
 
         protected override void Write(LogEventInfo logEvent)
         {
-            var record = new Dictionary<string, object> {
-                { "level", logEvent.Level.Name },
-                { "message", Layout.Render(logEvent) },
-                { "logger_name", logEvent.LoggerName },
-                { "sequence_id", logEvent.SequenceID },
-            };
+            IDictionary<string, object> data = new Dictionary<string, object>();
+
+            var messageLayout = Layout.Render(logEvent);
+            try
+            {
+                data = JsonConvert.DeserializeObject<IDictionary<string, object>>(messageLayout);
+            }
+            catch{}
+            data.Add("level", logEvent.Level.Name);
+            data.Add("logger_name", logEvent.LoggerName);
+            data.Add("sequence_id", logEvent.SequenceID);
+            if (AddPlainMessage)
+                data.Add("message", messageLayout);
+
+
             if (EmitStackTraceWhenAvailable && logEvent.HasStackTrace)
             {
                 var transcodedFrames = new List<Dictionary<string, object>>();
                 StackTrace stackTrace = logEvent.StackTrace;
                 foreach (StackFrame frame in stackTrace.GetFrames())
                 {
+
                     var transcodedFrame = new Dictionary<string, object>
                     {
                         { "filename", frame.GetFileName() },
@@ -264,18 +277,17 @@ namespace NLog.Targets
                     };
                     transcodedFrames.Add(transcodedFrame);
                 }
-                record.Add("stacktrace", transcodedFrames);
+                data.Add("stacktrace", transcodedFrames);
             }
+
             EnsureConnected();
             if (this.emitter != null)
             {
                 try
                 {
-                    this.emitter.Emit(logEvent.TimeStamp, Tag, record);
+                    this.emitter.Emit(logEvent.TimeStamp, Tag, data);
                 }
-                catch (Exception e)
-                {
-                }
+                catch { }
             }
         }
 
@@ -292,6 +304,7 @@ namespace NLog.Targets
             EmitStackTraceWhenAvailable = false;
             Tag = Assembly.GetCallingAssembly().GetName().Name;
             client = new TcpClient();
+            AddPlainMessage = true;
         }
     }
 }
