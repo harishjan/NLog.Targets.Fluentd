@@ -188,6 +188,7 @@ namespace NLog.Targets
         private FluentdEmitter emitter;
 
         public bool AddPlainMessage { get; set; }
+        public bool UseJsonParsing { get; set; }
 
         protected override void InitializeTarget()
         {
@@ -247,11 +248,14 @@ namespace NLog.Targets
             IDictionary<string, object> data = new Dictionary<string, object>();
 
             var messageLayout = Layout.Render(logEvent);
-            try
+            if (UseJsonParsing)
             {
-                data = JsonConvert.DeserializeObject<IDictionary<string, object>>(messageLayout);
+                try
+                {
+                    data = JsonConvert.DeserializeObject<IDictionary<string, object>>(messageLayout);
+                }
+                catch { }
             }
-            catch{}
             data.Add("level", logEvent.Level.Name);
             data.Add("logger_name", logEvent.LoggerName);
             data.Add("sequence_id", logEvent.SequenceID);
@@ -305,6 +309,7 @@ namespace NLog.Targets
             Tag = Assembly.GetCallingAssembly().GetName().Name;
             client = new TcpClient();
             AddPlainMessage = true;
+            UseJsonParsing = false;
         }
     }
 }
