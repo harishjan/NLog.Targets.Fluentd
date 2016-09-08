@@ -187,7 +187,7 @@ namespace NLog.Targets
 
         private FluentdEmitter emitter;
 
-        private bool AddPlainMessage { get; set; }
+        public bool AddPlainMessage { get; set; }
 
         protected override void InitializeTarget()
         {
